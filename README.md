@@ -29,10 +29,10 @@ The pieces that are not auto-configured:
   `OTEL` appender in `logback-spring.xml`, and calls `OpenTelemetryAppender.install(openTelemetry)` from
   [`OpenTelemetryAppenderInstaller`](src/main/java/com/example/otel/OpenTelemetryAppenderInstaller.java).
   The appender version (`2.28.1-alpha`) is chosen to match the OpenTelemetry SDK version that Boot 4.1.2 manages (1.62.0).
-- **Endpoints**: `application.properties` points all three signals at `http://localhost:4318` (the stack from
+- **Endpoints**: `application.yml` points all three signals at `http://localhost:4318` (the stack from
   `podman compose up`). In tests and `spring-boot:test-run`, `@ServiceConnection` (Testcontainers) overrides them with the
   container's mapped ports.
-- **Settings** in [`application.properties`](src/main/resources/application.properties): 100% trace sampling
+- **Settings** in [`application.yml`](src/main/resources/application.yml): 100% trace sampling
   (the default is 10%), a 10s metrics push interval (the default is 1m), and an HTTP latency histogram so p95/p99 can be queried.
 
 Each request to `GET /greeting?name=X`:
@@ -115,13 +115,51 @@ To check each signal by hand in Grafana, follow **[docs/grafana-manual-verificat
 
 ## Sending to another backend
 
-To send to a collector or vendor endpoint other than LGTM, override the endpoints:
+To send to a collector or vendor endpoint other than LGTM, override the endpoints. For `https://` endpoints, also
+reference an [SSL bundle](https://docs.spring.io/spring-boot/4.1/reference/features/ssl.html). The commented-out
+`ssl.bundle` entries in [`application.yml`](src/main/resources/application.yml) show where each one goes:
 
-```properties
-management.opentelemetry.logging.export.otlp.endpoint=https://collector.example.com:4318/v1/logs
-management.otlp.metrics.export.url=https://collector.example.com:4318/v1/metrics
-management.opentelemetry.tracing.export.otlp.endpoint=https://collector.example.com:4318/v1/traces
+```yaml
+spring:
+  ssl:
+    bundle:
+      pem:
+        otlp:
+          truststore:
+            certificate: "classpath:certs/otlp-ca.crt"   # CA that signed the collector's certificate
+
+management:
+  opentelemetry:
+    logging:
+      export:
+        otlp:
+          endpoint: https://collector.example.com:4318/v1/logs
+          ssl:
+            bundle: otlp
+    tracing:
+      export:
+        otlp:
+          endpoint: https://collector.example.com:4318/v1/traces
+          ssl:
+            bundle: otlp
+  otlp:
+    metrics:
+      export:
+        url: https://collector.example.com:4318/v1/metrics
+        ssl:
+          bundle: otlp
 ```
+
+| Where | Property | Needed when |
+|-------|----------|-------------|
+| Bundle definition | `spring.ssl.bundle.pem.<name>.*` / `spring.ssl.bundle.jks.<name>.*` | any of the rows below are used |
+| Logs exporter | `management.opentelemetry.logging.export.otlp.ssl.bundle` | logs endpoint is `https://` |
+| Traces exporter | `management.opentelemetry.tracing.export.otlp.ssl.bundle` | traces endpoint is `https://` |
+| Metrics exporter | `management.otlp.metrics.export.ssl.bundle` | metrics URL is `https://` |
+| Application server | `server.ssl.bundle` | the app serves HTTPS |
+| Actuator server | `management.server.ssl.bundle` | actuator runs on a separate `management.server.port` over HTTPS |
+
+Add a `keystore` (client certificate and key) to the bundle when the collector requires mutual TLS.
 
 ## References
 

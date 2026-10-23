@@ -1,0 +1,90 @@
+spring:
+  application:
+    name: spring-boot4-otel
+
+  # SSL bundles: define the TLS material once here, then reference it by name (see the
+  # "ssl.bundle" comments below). Only needed when the OTLP endpoints use https:// or the
+  # application itself serves HTTPS. The local LGTM stack uses plain HTTP, so none is configured.
+  #
+  # ssl:
+  #   bundle:
+  #     pem:
+  #       # Trust store for the OTLP collector's certificate (server-side TLS)
+  #       otlp:
+  #         truststore:
+  #           certificate: "classpath:certs/otlp-ca.crt"
+  #         # Add a keystore as well if the collector requires mutual TLS (client certificates)
+  #         # keystore:
+  #         #   certificate: "classpath:certs/otlp-client.crt"
+  #         #   private-key: "classpath:certs/otlp-client.key"
+  #         # reload-on-update: true   # pick up rotated certificates without a restart
+  #       # Certificate and key for serving the application over HTTPS
+  #       server:
+  #         keystore:
+  #           certificate: "classpath:certs/server.crt"
+  #           private-key: "classpath:certs/server.key"
+  #     # A JKS/PKCS12 keystore works the same way under "jks":
+  #     # jks:
+  #     #   otlp:
+  #     #     truststore:
+  #     #       location: "classpath:certs/otlp-truststore.p12"
+  #     #       password: "${OTLP_TRUSTSTORE_PASSWORD}"
+  #     #       type: PKCS12
+
+# SSL bundle: for HTTPS on the application port (8080), uncomment and reference a bundle
+# server:
+#   ssl:
+#     bundle: server
+
+management:
+  # SSL bundle: if actuator runs on its own port (management.server.port), HTTPS for it is
+  # configured separately
+  # server:
+  #   ssl:
+  #     bundle: server
+
+  opentelemetry:
+    # Resource attributes attached to every log record, metric and span
+    resource-attributes:
+      "[deployment.environment.name]": local
+
+    # Logs. OTLP/HTTP endpoint of the LGTM stack started with `podman compose up` (compose.yaml).
+    # Testcontainers (TestcontainersConfiguration) overrides it with the container's mapped port.
+    logging:
+      export:
+        otlp:
+          endpoint: http://localhost:4318/v1/logs
+          # SSL bundle: required when the endpoint above uses https://
+          # ssl:
+          #   bundle: otlp
+
+    # Traces (overridden by Testcontainers, see above)
+    tracing:
+      export:
+        otlp:
+          endpoint: http://localhost:4318/v1/traces
+          # SSL bundle: required when the endpoint above uses https://
+          # ssl:
+          #   bundle: otlp
+
+  tracing:
+    sampling:
+      # Sample every request (default is 10%)
+      probability: 1.0
+
+  # Metrics (overridden by Testcontainers, see above)
+  otlp:
+    metrics:
+      export:
+        url: http://localhost:4318/v1/metrics
+        # Push every 10s instead of the default 1 minute
+        step: 10s
+        # SSL bundle: required when the url above uses https://
+        # ssl:
+        #   bundle: otlp
+
+  metrics:
+    distribution:
+      # Publish histogram buckets for HTTP server requests so latency percentiles can be computed in Prometheus
+      percentiles-histogram:
+        "[http.server.requests]": true
