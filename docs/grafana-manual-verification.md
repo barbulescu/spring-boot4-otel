@@ -5,12 +5,13 @@ This guide shows how to confirm by hand that each signal reaches Grafana, and th
 ## 1. Start the stack and the application
 
 ```bash
-# Testcontainers (Docker or Podman)
+# Option A: Testcontainers on Podman
 ./mvnw spring-boot:test-run
 # Look for this line in the console and open the URL:
 #   Grafana is available at http://localhost:NNNNN (user: admin, password: admin)
 
-# or Docker Compose: Grafana at http://localhost:3000
+# Option B: podman compose. Grafana at http://localhost:3000
+podman compose up -d
 ./mvnw spring-boot:run
 ```
 
@@ -128,5 +129,7 @@ Use **Split** in Explore to keep Loki and Tempo side by side.
 | Metrics show up late | Metrics are pushed every `management.otlp.metrics.export.step` (10s here; the default is 1m). |
 | No logs in Loki, but traces/metrics are fine | Check that `logback-spring.xml` includes the `OTEL` appender and that `OpenTelemetryAppenderInstaller` runs. Without `OpenTelemetryAppender.install(...)` the appender silently drops events. |
 | p95 query returns `NaN` | Needs `management.metrics.distribution.percentiles-histogram.http.server.requests=true` and at least two scrapes' worth of traffic. |
-| `spring-boot:run` fails with `Cannot run program "docker"` | Docker Compose support needs the `docker` CLI. Use `./mvnw spring-boot:test-run` instead (Testcontainers works with Podman). |
+| `spring-boot:run` logs OTLP export errors (connection refused) | The LGTM stack isn't running on ports 4318/3000. Start it with `podman compose up -d`, or use `./mvnw spring-boot:test-run`. |
+| `podman compose` fails with `looking up compose provider failed` | Install a provider (`brew install podman-compose`), or use the `podman run` command from the README. |
+| Tests fail with `Could not find a valid Docker environment` | Testcontainers can't reach Podman. Run `podman machine start` and set `DOCKER_HOST` as described in the README (*Pointing Testcontainers at Podman*). |
 | In tests, metrics/traces are missing but logs arrive | Spring Boot disables metrics/tracing export in tests; add `@AutoConfigureMetrics` and `@AutoConfigureTracing`. |

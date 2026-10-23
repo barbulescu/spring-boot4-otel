@@ -29,8 +29,9 @@ The pieces that are not auto-configured:
   `OTEL` appender in `logback-spring.xml`, and calls `OpenTelemetryAppender.install(openTelemetry)` from
   [`OpenTelemetryAppenderInstaller`](src/main/java/com/example/otel/OpenTelemetryAppenderInstaller.java).
   The appender version (`2.28.1-alpha`) is chosen to match the OpenTelemetry SDK version that Boot 4.1.2 manages (1.62.0).
-- **Endpoints**: none are hard-coded. `@ServiceConnection` (Testcontainers) or `compose.yaml` (Docker Compose)
-  supplies the OTLP endpoints for all three signals.
+- **Endpoints**: `application.properties` points all three signals at `http://localhost:4318` (the stack from
+  `podman compose up`). In tests and `spring-boot:test-run`, `@ServiceConnection` (Testcontainers) overrides them with the
+  container's mapped ports.
 - **Settings** in [`application.properties`](src/main/resources/application.properties): 100% trace sampling
   (the default is 10%), a 10s metrics push interval (the default is 1m), and an HTTP latency histogram so p95/p99 can be queried.
 
@@ -43,7 +44,27 @@ Each request to `GET /greeting?name=X`:
 ## Prerequisites
 
 - JDK 25
-- Docker, or Podman with the Docker-compatible socket enabled (`podman machine start`)
+- [Podman](https://podman.io/) 5.x with a running machine (`podman machine init && podman machine start` on macOS/Windows)
+- For `podman compose`: a compose provider (`brew install podman-compose`, or `docker-compose` on the `PATH`)
+
+### Pointing Testcontainers at Podman
+
+Testcontainers talks to Podman through its Docker-compatible API. If the `podman machine start` output says
+*"Docker API clients default to this address"* (the `podman-mac-helper` links `/var/run/docker.sock` to Podman), you don't need to configure anything.
+If it doesn't, export these before running Maven (add them to `~/.zshrc` to make them permanent):
+
+```bash
+# macOS / Windows (Podman machine)
+export DOCKER_HOST="unix://$(podman machine inspect --format '{{.ConnectionInfo.PodmanSocket.Path}}')"
+export TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock
+
+# Linux (rootless Podman)
+systemctl --user enable --now podman.socket
+export DOCKER_HOST="unix://${XDG_RUNTIME_DIR}/podman/podman.sock"
+```
+
+[`src/test/resources/testcontainers.properties`](src/test/resources/testcontainers.properties) sets
+`ryuk.container.privileged=true`. Rootless Podman needs this for the Ryuk cleanup container to start.
 
 ## Run the tests
 
@@ -63,19 +84,25 @@ Each request to `GET /greeting?name=X`:
 > Spring Boot disables metrics and tracing export in tests by default. The test class turns them back on with
 > `@AutoConfigureMetrics` and `@AutoConfigureTracing`.
 
-The first run downloads the `grafana/otel-lgtm` image (~2.6 GB), so it takes a while.
+The first run downloads the `grafana/otel-lgtm` image (~2.6 GB), so it takes a while. To download it ahead of time:
+`podman pull docker.io/grafana/otel-lgtm:0.38.0`.
 
 ## Run locally and look at the data in Grafana
 
 You can run it in either of two ways:
 
 ```bash
-# A) Testcontainers (works with Docker or Podman). The Grafana URL (random port) is logged at startup:
+# A) Testcontainers on Podman: one command; the stack stops when the app stops.
+#    The Grafana URL (random port) is logged at startup:
 #    "Grafana is available at http://localhost:NNNNN (user: admin, password: admin)"
 ./mvnw spring-boot:test-run
 
-# B) Docker Compose (needs the `docker` CLI with the compose plugin). Grafana is at http://localhost:3000
+# B) Long-running stack with Podman. Grafana is at http://localhost:3000 and keeps its data across app restarts.
+podman compose up -d
+#    (or, without a compose provider:
+#     podman run -d --name lgtm -p 3000:3000 -p 4317:4317 -p 4318:4318 docker.io/grafana/otel-lgtm:0.38.0)
 ./mvnw spring-boot:run
+podman compose down            # when finished (or: podman rm -f lgtm)
 ```
 
 Generate some traffic:
@@ -88,10 +115,9 @@ To check each signal by hand in Grafana, follow **[docs/grafana-manual-verificat
 
 ## Sending to another backend
 
-To send to a collector or vendor endpoint other than LGTM, set the endpoints explicitly (and turn off Docker Compose):
+To send to a collector or vendor endpoint other than LGTM, override the endpoints:
 
 ```properties
-spring.docker.compose.enabled=false
 management.opentelemetry.logging.export.otlp.endpoint=https://collector.example.com:4318/v1/logs
 management.otlp.metrics.export.url=https://collector.example.com:4318/v1/metrics
 management.opentelemetry.tracing.export.otlp.endpoint=https://collector.example.com:4318/v1/traces
